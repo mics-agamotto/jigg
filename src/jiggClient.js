@@ -113,6 +113,9 @@ Agent.prototype.setInput = function (input, encoding) {
     while (this.input.length < size) {
       this.input.push(0);
     }
+    console.log(hexutils.bin2hex(this.input.reverse().join('')));
+    this.input.reverse();
+
   }
 
   if (encoding === 'bits' || encoding == null) {
@@ -173,9 +176,9 @@ Agent.prototype.start = function () {
     self.socket.hear('go').then(function () {
       self.progress('connected');
       if (self.role === 'Garbler') {
-        garble(self);
+        garble.run(self);
       } else {
-        evaluate(self);
+        evaluate.run(self);
       }
     });
   });

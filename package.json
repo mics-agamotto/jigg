@@ -22,7 +22,7 @@
   },
   "scripts": {
     "test": "mocha test/test.js --timeout 120000",
-    "build": "browserify src/jiggClient.js --debug --s JIGG -o dist/jigg.js",
+    "build": "browserify src/jiggAgamotto.js --debug --s JIGG -o dist/jigg.js",
     "docs": "jsdoc -r src -c jsdoc.conf.json",
     "casm": "node node_modules/casm/casm.js",
     "lint": "eslint ./src/ ./demo/",

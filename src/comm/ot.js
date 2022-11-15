@@ -32,6 +32,72 @@ OT.prototype.send = function (tag, m0, m1) {
   });
 };
 
+OT.prototype.generateBatchOT = function (n) {
+  let resp = [];
+  for (let i = 0; i < n; i++) {
+    const a = sodium.crypto_core_ristretto255_scalar_random();
+    const A = sodium.crypto_scalarmult_ristretto255_base(a);
+    resp.push([a, A]);
+  }
+  return resp;
+}
+
+OT.prototype.processBatchOT = function (n, aAs, Bs, m0s, m1s) {
+  let resp = [];
+  for (let i = 0; i < n; i++) {
+    const a = aAs[i][0];
+    const A = aAs[i][1];
+    const B = Uint8Array.from(Bs[i]);
+    const m0 = m0s[i];
+    const m1 = m1s[i];
+
+    let k0 = sodium.crypto_scalarmult_ristretto255(a, B);
+    let k1 = sodium.crypto_scalarmult_ristretto255(a, sodium.crypto_core_ristretto255_sub(B, A));
+
+    k0 = sodium.crypto_generichash(m0.bytes.length, k0);
+    k1 = sodium.crypto_generichash(m1.bytes.length, k1);
+
+    const e0 = crypto.encrypt_generic(m0, k0, 0);
+    const e1 = crypto.encrypt_generic(m1, k1, 0);
+    resp.push([e0.serialize(), e1.serialize()]);
+
+    // console.log("Bit", i, "k0", k0, "m0", m0, "e0", e0);
+  }
+  return resp;
+}
+
+OT.prototype.handleBatchOT = function (n, As, Bs, cs) {
+  const newBs = [];
+  for (let i = 0; i < n; i++) {
+    let B = Bs[i];
+    if (cs[i] === 1) {
+      let A = Uint8Array.from(As[i]);
+      B = sodium.crypto_core_ristretto255_add(A, B);
+    }
+    newBs.push(B);
+    // console.log("Bit", i, cs[i], "B", B, "A", Uint8Array.from(As[i]));
+  }
+  return newBs;
+}
+
+OT.prototype.finalizeBatchOT = function (n, As, bs, cs, es) {
+  const res = [];
+  for (let i = 0; i < n; i++) {
+    let A = Uint8Array.from(As[i]);
+    let b = bs[i];
+    let e = es[i];
+    let c = cs[i];
+
+    let ee = labelParser(e[c]);
+    let k = sodium.crypto_scalarmult_ristretto255(b, A);
+    k = sodium.crypto_generichash(ee.bytes.length, k);
+
+    res.push(crypto.decrypt_generic(ee, k, 0));
+    // console.log("Bit", i, "k", k, "e0", ee, "m0", crypto.decrypt_generic(ee, k, 0));
+  }
+  return res;
+}
+
 OT.prototype.receive = function (tag, c) {
   const self = this;
   const _id = this.socket.nextId();

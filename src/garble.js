@@ -7,6 +7,7 @@ const Circuit = require('./modules/circuit.js');
 const Gate = require('./modules/gate.js');
 const labelParser = require('./parse/label.js');
 const crypto = require('./util/crypto.js');
+const OT = require('./comm/ot.js');
 
 const generateInputLabels = function (R, count, labelSize) {
   const garbledAssignment = [];
@@ -110,13 +111,13 @@ const sendInputLabels = function (agent, garbledAssignment) {
   // send garbler input labels
   for (let i = 0; i < garblerInputSize; i++) {
     const label = garbledAssignment[i][agent.input[i]];
-    agent.socket.send('wire'+i, label.serialize());
+    agent.socket.send('wire' + i, label.serialize());
   }
 
   // Send the evaluator the first half of the input labels directly.
   for (let i = 0; i < evaluatorInputSize; i++) {
     const index = i + garblerInputSize;
-    agent.OT.send('wire'+index, garbledAssignment[index][0], garbledAssignment[index][1]);
+    agent.OT.send('wire' + index, garbledAssignment[index][0], garbledAssignment[index][1]);
   }
 };
 
@@ -195,4 +196,100 @@ const run = function (agent) {
   });
 };
 
-module.exports = run;
+const initCircuit = function (circuit, inputArr) {
+  const agent = { labelSize: 16 };
+  const garbledCircuit = new Circuit(circuit.wiresCount, circuit.garblerInputSize, circuit.evaluatorInputSize, circuit.outputSize, agent.labelSize);
+
+  // generate random offset
+  const R = new Label(sodium.randombytes_buf(agent.labelSize));
+  R.setPoint(1);
+
+  // generate labels for input wires
+  const garbledAssignment = generateInputLabels(R, circuit.evaluatorInputSize + circuit.garblerInputSize, agent.labelSize);
+
+  // garble gates
+  for (let i = 0; i < circuit.gates.length; i++) {
+    if (i % 10000 === 0) {
+      console.log('garbling', i, circuit.gates.length);
+    }
+
+    let gate = circuit.gates[i];
+
+    if (gate.operation === 'AND') {
+      gate = garbleAnd(agent, gate, R, garbledAssignment);
+    } else if (gate.operation === 'LOR') {
+      gate = garbleLor(agent, gate, R, garbledAssignment);
+    } else if (gate.operation === 'XOR') {
+      gate = garbleXor(agent, gate, R, garbledAssignment);
+    } else if (gate.operation === 'NOT' || gate.operation === 'INV') {
+      gate = garbleNot(agent, gate, R, garbledAssignment);
+    } else {
+      throw new Error('Unrecognized gate: ' + gate.operation);
+    }
+
+    garbledCircuit.gates.push(gate);
+  }
+  console.log('garbling', circuit.gates.length, circuit.gates.length);
+
+  const ot = new OT(null);
+  const aAs = ot.generateBatchOT(circuit.evaluatorInputSize);
+
+  let resp = {
+    circuit: btoa(garbledCircuit.serialize()),
+    wires: [],
+    As: aAs.map(v => Array.from(v[1])),
+  };
+  
+  // send garbler input labels
+  for (let i = 0; i < circuit.garblerInputSize; i++) {
+    const label = garbledAssignment[i][inputArr[i]];
+    resp.wires.push(label.serialize());
+  }
+
+  // Send the evaluator the first half of the input labels directly.
+  // for (let i = 0; i < circuit.evaluatorInputSize; i++) {
+  //   const index = i + circuit.garblerInputSize;
+  //   agent.OT.send('wire' + index, garbledAssignment[index][0], garbledAssignment[index][1]);
+  // }
+
+  return {
+    response: resp,
+    garbledAssignment: garbledAssignment,
+    aAs: aAs,
+  };
+}
+
+const performOT = function (circuit, garbledAssignment, aAs, Bs) {
+  const ot = new OT(null);
+  const m0s = [];
+  const m1s = [];
+  for (let i = 0; i < circuit.evaluatorInputSize; i++) {
+    m0s.push(garbledAssignment[i + circuit.garblerInputSize][0]);
+    m1s.push(garbledAssignment[i + circuit.garblerInputSize][1]);
+  }
+  return ot.processBatchOT(circuit.evaluatorInputSize, aAs, Bs, m0s, m1s);
+}
+
+const computeOutput = function (circuit, garbledAssignment, labels) {
+  labels = labels.map(labelParser);
+  const bits = [];
+  for (let i = 0; i < circuit.outputSize; i++) {
+    const bitLabel = labels[i];
+    const options = garbledAssignment[circuit.wiresCount - circuit.outputSize + i];
+    if (options[0].equals(bitLabel)) {
+      bits.push(0);
+    } else if (options[1].equals(bitLabel)) {
+      bits.push(1);
+    } else {
+      console.log('Output label ' + i + ' unequal to either labels!');
+    }
+  }
+  return bits;
+}
+
+module.exports = {
+  run: run,
+  initCircuit: initCircuit,
+  performOT: performOT,
+  computeOutput: computeOutput,
+};

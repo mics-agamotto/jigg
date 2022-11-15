@@ -12,6 +12,7 @@ function ClientSocket(hostname, agent) {
   this.listeners = {};
   this.mailbox = {};
   this.socket.on('receive', function (tag, msg) {
+    console.log("receiving", tag, msg === undefined ? msg : msg.length);
     if (self.listeners[tag] != null) {
       self.listeners[tag](msg);
       delete self.listeners[tag];
@@ -28,6 +29,7 @@ function ClientSocket(hostname, agent) {
 }
 
 ClientSocket.prototype.join = function (role) {
+  console.log("JOINING");
   this.socket.emit('join', role);
 };
 
@@ -55,6 +57,7 @@ ClientSocket.prototype.send = function (tag, msg, _id) {
   if (_id == null) {
     _id = this._nextId++;
   }
+  console.log("sending", tag, msg === undefined ? msg : msg.length, _id);
 
   this.socket.emit('send', tag + _id, msg);
 };
